@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airplay-windows"
+dynamic = ["version"]
+description = "Use AirPlay speakers (HomePod, HomePod mini, AirPort Express, Apple TV) as the audio output of a Windows PC."
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+dependencies = [
+    "zeroconf>=0.130",
+    "cryptography>=41",
+    "soundcard>=0.4.3",
+    "numpy>=1.24",
+    # ui/tray.py hooks into pystray's Windows click handling, so stay on 0.19.x
+    "pystray>=0.19,<0.20",
+    "pillow>=10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+build = ["pyinstaller>=6.6"]
+
+[project.scripts]
+airplay-windows-cli = "airplay_windows.cli:main"
+
+[project.gui-scripts]
+airplay-windows = "airplay_windows.ui.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "airplay_windows.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tests"]

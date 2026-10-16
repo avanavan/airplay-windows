@@ -1,0 +1,102 @@
+name: CI
+
+# Every push and pull request: run the tests, then build the app folder, portable zip and installer.
+# Pushing a tag like v1.2.3 also publishes them as a GitHub release (the tag must match __version__).
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Run tests
+        run: python -m pytest -q
+
+  build:
+    name: Build installer
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[build]"
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (python -c "import airplay_windows; print(airplay_windows.__version__)").Trim()
+          "version=$version" >> $env:GITHUB_OUTPUT
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne "v$version") {
+            throw "Tag ${{ github.ref_name }} does not match the package version v$version (src/airplay_windows/__init__.py)"
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+
+      - name: Build
+        shell: pwsh
+        run: ./scripts/build.ps1 -Python python
+
+      - name: Smoke-test the packaged command line
+        shell: pwsh
+        run: |
+          & dist\airplay-windows\airplay-windows-cli.exe --version
+          & dist\airplay-windows\airplay-windows-cli.exe discover --timeout 2
+          # No speakers on a CI runner: exit code 1 ("none found") is expected; anything else is a failure.
+          if ($LASTEXITCODE -gt 1) { exit $LASTEXITCODE } else { exit 0 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: airplay-windows-${{ steps.version.outputs.version }}
+          path: |
+            dist/airplay-windows-*-setup.exe
+            dist/airplay-windows-*-portable.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
